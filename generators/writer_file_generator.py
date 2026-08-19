@@ -1,119 +1,251 @@
-import subprocess
+"""Generate a LibreOffice Writer document with a safe, manual macro.
+
+LibreOffice document macros are embedded in the document's Basic library.  The
+old implementation relied on the current GUI document, raced a background
+LibreOffice process, and attempted to access the Basic API through an invalid
+UNO object path.  This module uses an isolated headless LibreOffice process and
+loads the requested template explicitly.
+
+This generator intentionally accepts only inert/manual Basic sources.  It does
+not embed event handlers or permit shell, network, file-changing, or process
+launch behavior.  The existing Microsoft Office generator contains an
+auto-open PowerShell/network payload and is not a safe parity target.
+"""
+
+from __future__ import annotations
+
 import os
+import re
+import socket
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
+
 import yaml
 from jinja2 import Template
-import threading
-import time
 
-cfg = None
-project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-config_file = os.path.join(project_dir, "config.yml")
-template_dir = os.path.join(project_dir, "templates")
-output_dir = os.path.join(project_dir, "output")
 
-# Libre office imports
-libre_office_utils = os.path.join(project_dir, "utils", "libre_office")
-writer_macro_import_file = os.path.join(libre_office_utils, "writer_macro_import.py")
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = PROJECT_DIR / "config.yml"
+TEMPLATE_DIR = PROJECT_DIR / "templates"
+OUTPUT_DIR = PROJECT_DIR / "output"
+LIBREOFFICE_UTILS = PROJECT_DIR / "utils" / "libre_office"
+WRITER_MACRO_IMPORT_FILE = LIBREOFFICE_UTILS / "writer_macro_import.py"
+LIBREOFFICE_TEMPLATE_EXTENSIONS = {".odt", ".ott", ".sxw"}
+LIBREOFFICE_MACRO_EXTENSIONS = {".bas"}
 
-with open(config_file, "r") as stream:
+
+def _load_config() -> dict:
+    with CONFIG_FILE.open("r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
     try:
-        cfg = yaml.safe_load(stream)
-        libre_office_cfg = cfg["app"]["libre_office"]
-
-    except yaml.YAMLError as exc:
-        print(f"Error reading configuration from '{config_file}': {exc}")
-        sys.exit(1)
-
-
-def start_libreoffice_writer():
-    cmd = f'start /min "" "{libre_office_cfg["exe"]}" --writer --accept="socket,host=localhost,port=2002;urp;"'
-    subprocess.Popen(cmd, shell=True)
-
-
-# 'start /min "c:/Program Files (x86)/LibreOffice 5/program/soffice.exe" --writer --accept="socket,host=localhost,port=2002;urp;"'
-def create_tmp_macro_file(macro_path, macro_tmp_path):
-    with open(macro_path, "r") as macro_file:
-        macro_template = Template(macro_file.read())
-
-    rendered_macro = macro_template.render(
-        malware_url=cfg["app"]["macros"]["malware_url"],
-        reverse_shell_ip=cfg["app"]["macros"]["reverse_shell_ip"],
-    )
-
-    # Create the directory if it doesn't exist
-    os.makedirs(os.path.dirname(macro_tmp_path), exist_ok=True)
-
-    with open(macro_tmp_path, "w") as tmp_macro_file:
-        tmp_macro_file.write(rendered_macro)
-
-
-def run_macro_import(template_file, macro_tmp_file, output_file):
-    # Insert a delay to allow some time for LibreOffice Writer to fully open
-    time.sleep(5)
-
-    cmd = f'"{libre_office_cfg["python"]}" "{writer_macro_import_file}" "{template_file}" "{macro_tmp_file}" "{output_file}"'
-    subprocess.run(cmd, shell=True, check=True)
-
-
-def get_template_path(template_name):
-    if os.path.basename(template_name) != template_name:
+        config["app"]["libre_office"]["exe"]
+        config["app"]["libre_office"]["python"]
+        config["app"]["macros"]
+    except (KeyError, TypeError) as exc:
         raise ValueError(
-            "Template must be a filename from templates/files/libre_office"
-        )
+            "config.yml must define app.libre_office.exe, "
+            "app.libre_office.python, and app.macros"
+        ) from exc
+    return config
 
-    template_path = os.path.join(template_dir, "files", "libre_office", template_name)
-    if not os.path.isfile(template_path):
+
+def _filename_only(value: str, description: str) -> Path:
+    path = Path(value)
+    if path.name != value:
+        raise ValueError(f"{description} must be a filename, not a path")
+    return path
+
+
+def get_template_path(template_name: str) -> Path:
+    path = _filename_only(template_name, "Template")
+    if path.suffix.lower() not in LIBREOFFICE_TEMPLATE_EXTENSIONS:
+        raise ValueError("LibreOffice templates must use .odt, .ott, or .sxw")
+
+    template_path = TEMPLATE_DIR / "files" / "libre_office" / path.name
+    if not template_path.is_file():
         raise FileNotFoundError(f"Template not found: {template_path}")
-
     return template_path
 
 
-def get_macro_path(macro_name):
-    if os.path.basename(macro_name) != macro_name:
-        raise ValueError(
-            "Macro must be a filename from templates/macros/libre_office"
-        )
+def get_macro_path(macro_name: str) -> Path:
+    path = _filename_only(macro_name, "Macro payload")
+    if path.suffix.lower() not in LIBREOFFICE_MACRO_EXTENSIONS:
+        raise ValueError("LibreOffice macro payloads must use the .bas extension")
 
-    macro_path = os.path.join(template_dir, "macros", "libre_office", macro_name)
-    if not os.path.isfile(macro_path):
-        raise FileNotFoundError(f"Macro not found: {macro_path}")
-
+    macro_path = TEMPLATE_DIR / "macros" / "libre_office" / path.name
+    if not macro_path.is_file():
+        raise FileNotFoundError(f"Macro payload not found: {macro_path}")
     return macro_path
 
 
-def main(template_name, macro_name):
-    template_file = get_template_path(template_name)
-    macro_path = get_macro_path(macro_name)
+def validate_macro_source(source: str) -> None:
+    """Apply a conservative guardrail for the manual training path.
 
-    # Create new macro tmp file with added values using jinja
-    macro_tmp_file = os.path.join(template_dir, "macros", "tmp", macro_name)
-    create_tmp_macro_file(macro_path, macro_tmp_file)
+    This is deliberately a deny-list in addition to the requirement that the
+    file contain a Basic procedure.  It is not presented as a security sandbox;
+    it prevents the known shell/network/autorun patterns from this project from
+    being copied into LibreOffice documents.
+    """
 
-    # Create output file
-    output_file = os.path.join(output_dir, template_name)
-    os.makedirs(output_dir, exist_ok=True)
+    if not source.strip():
+        raise ValueError("LibreOffice macro payload is empty")
+    if not re.search(r"(?im)^\s*(sub|function)\s+[A-Za-z_]", source):
+        raise ValueError("LibreOffice macro payload must contain a Basic procedure")
 
-    libreoffice_thread = threading.Thread(target=start_libreoffice_writer, daemon=True)
-    macro_import_thread = threading.Thread(
-        target=run_macro_import, args=(template_file, macro_tmp_file, output_file)
+    forbidden_patterns = (
+        r"\b(createobject|shell|shellexecute|powershell|cmd(?:\.exe)?|curl|wget)\b",
+        r"\b(winhttp|xmlhttp|http|https|ftp)\s*[:/]",
+        r"\b(autoopen|autoclose|documentopen|documentclose|onload|onopen)\b",
+        r"\b(filecopy|kill|mkdir|rmdir|name)\s*\(",
+        r"\b(exec|execute|openurl)\s*\(",
+    )
+    for pattern in forbidden_patterns:
+        if re.search(pattern, source, flags=re.IGNORECASE):
+            raise ValueError(
+                "Unsafe LibreOffice macro rejected: shell, network, "
+                "file-changing, process-launch, or autorun behavior detected"
+            )
+
+
+def render_macro_source(macro_path: Path, config: dict) -> str:
+    """Render a Basic template and reject unsafe behavior before embedding it."""
+
+    source = macro_path.read_text(encoding="utf-8-sig")
+    rendered = Template(source).render(
+        agent_url=config["app"]["macros"].get("agent_url", ""),
+        reverse_shell_ip=config["app"]["macros"].get("reverse_shell_ip", ""),
+    )
+    validate_macro_source(rendered)
+    return rendered
+
+
+def _free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def start_libreoffice_writer(executable: Path, profile_dir: Path, port: int):
+    if not executable.is_file():
+        raise FileNotFoundError(
+            f"LibreOffice executable not found: {executable}. "
+            "Update app.libre_office.exe in config.yml."
+        )
+
+    command = [
+        str(executable),
+        "--headless",
+        "--nologo",
+        "--nodefault",
+        "--norestore",
+        f"--env:UserInstallation={profile_dir.resolve().as_uri()}",
+        f"--accept=socket,host=127.0.0.1,port={port};urp;StarOffice.ComponentContext",
+    ]
+    return subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
-    libreoffice_thread.start()
-    macro_import_thread.start()
-    macro_import_thread.join()
-    return output_file
+
+def run_macro_import(
+    python_executable: Path,
+    template_file: Path,
+    macro_file: Path,
+    output_file: Path,
+    port: int,
+) -> None:
+    if not python_executable.is_file():
+        raise FileNotFoundError(
+            f"LibreOffice Python runtime not found: {python_executable}. "
+            "Update app.libre_office.python in config.yml."
+        )
+
+    command = [
+        str(python_executable),
+        str(WRITER_MACRO_IMPORT_FILE),
+        str(template_file),
+        str(macro_file),
+        str(output_file),
+        str(port),
+    ]
+    result = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.returncode:
+        detail = (
+            result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+        )
+        raise RuntimeError(f"LibreOffice macro import failed: {detail}")
+
+
+def _stop_process(process) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+
+
+def main(template_name: str, macro_name: str) -> str:
+    config = _load_config()
+    template_file = get_template_path(template_name)
+    macro_path = get_macro_path(macro_name)
+    rendered_source = render_macro_source(macro_path, config)
+
+    output_file = OUTPUT_DIR / f"{template_file.stem}.odt"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    libreoffice_cfg = config["app"]["libre_office"]
+    executable = Path(os.path.expandvars(libreoffice_cfg["exe"]))
+    python_executable = Path(os.path.expandvars(libreoffice_cfg["python"]))
+    port = _free_tcp_port()
+
+    with tempfile.TemporaryDirectory(prefix="macro-generator-libreoffice-") as runtime:
+        runtime_dir = Path(runtime)
+        macro_file = runtime_dir / macro_path.name
+        macro_file.write_text(rendered_source, encoding="utf-8")
+
+        process = None
+        try:
+            process = start_libreoffice_writer(
+                executable, runtime_dir / "profile", port
+            )
+            run_macro_import(
+                python_executable,
+                template_file,
+                macro_file,
+                output_file,
+                port,
+            )
+        finally:
+            _stop_process(process)
+
+    return str(output_file)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    if len(sys.argv) != 3:
         print(
             "Usage: python generators/writer_file_generator.py "
             "<template_name> <macro_name>"
         )
         sys.exit(1)
 
-    template_name = sys.argv[1]
-    macro_name = sys.argv[2]
-
-    main(template_name, macro_name)
+    try:
+        print(f"Generated file: {main(sys.argv[1], sys.argv[2])}")
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
+        print(f"Generation failed: {exc}", file=sys.stderr)
+        sys.exit(1)

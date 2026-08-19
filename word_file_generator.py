@@ -5,10 +5,10 @@ import yaml
 from jinja2 import Template
 
 cfg = None
-project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-config_file = os.path.join(project_dir, "config.yml")
-template_dir = os.path.join(project_dir, "templates")
-output_dir = os.path.join(project_dir, "output")
+parent_dir = os.path.dirname(os.path.abspath(__file__))
+config_file = os.path.join(parent_dir, "config.yml")
+template_dir = os.path.join(parent_dir, "templates")
+output_dir = os.path.join(parent_dir, "output")
 
 with open(config_file, "r") as stream:
     try:
@@ -33,7 +33,6 @@ def insert_macro_from_file(macro_path, target_doc):
     rendered_macro = macro_template.render(
         agent_url=cfg["app"]["macros"]["agent_url"],
         reverse_shell_ip=cfg["app"]["macros"]["reverse_shell_ip"],
-        caldera_ip=cfg["app"]["macros"]["caldera_ip"],
     )
 
     target_vba_project = target_doc.VBProject
@@ -42,37 +41,15 @@ def insert_macro_from_file(macro_path, target_doc):
     )
 
 
-def get_template_path(template_name):
-    if os.path.basename(template_name) != template_name:
-        raise ValueError("Template must be a filename from templates/files/ms_office")
-
+def main(template_id, macro_id):
+    # Get template path from config using template_id
+    template_name = cfg["templates"]["ms_office"]["word"][template_id]
     template_path = os.path.join(template_dir, "files", "ms_office", template_name)
-    if not os.path.isfile(template_path):
-        raise FileNotFoundError(f"Template not found: {template_path}")
-
-    return template_path
-
-
-def get_macro_path(macro_name):
-    if os.path.basename(macro_name) != macro_name:
-        raise ValueError("Macro must be a filename from templates/macros/ms_office")
-
-    macro_path = os.path.join(template_dir, "macros", "ms_office", macro_name)
-    if not os.path.isfile(macro_path):
-        raise FileNotFoundError(f"Macro not found: {macro_path}")
-
-    return macro_path
-
-
-def main(template_name, macro_name):
-    template_path = get_template_path(template_name)
-    macro_path = get_macro_path(macro_name)
 
     # Load the Word template (template with the associated macro)
     word_app, template_doc = load_word_template(template_path)
 
     # Save the new document in the output folder
-    os.makedirs(output_dir, exist_ok=True)
     new_doc_path = os.path.join(
         output_dir, os.path.splitext(os.path.basename(template_name))[0]
     )
@@ -84,6 +61,8 @@ def main(template_name, macro_name):
     new_doc = word_app.Documents.Open(new_doc_path)
 
     # Insert macro from text file into the new document
+    macro_name = cfg["macros"]["ms_office"][macro_id]
+    macro_path = os.path.join(template_dir, "macros", "ms_office", macro_name)
     insert_macro_from_file(macro_path, new_doc)
 
     # Save the output document with the macro inserted
@@ -92,18 +71,14 @@ def main(template_name, macro_name):
     # Close the documents
     new_doc.Close()
     word_app.Quit()
-    return new_doc_path
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print(
-            "Usage: python generators/word_file_generator.py "
-            "<template_name> <macro_name>"
-        )
+        print("Usage: python script.py <template_id> <macro_id>")
         sys.exit(1)
 
-    template_name = sys.argv[1]
-    macro_name = sys.argv[2]
+    template_id = int(sys.argv[1])
+    macro_id = int(sys.argv[2])
 
-    main(template_name, macro_name)
+    main(template_id, macro_id)

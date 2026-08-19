@@ -32,8 +32,9 @@ def insert_macro_from_file(macro_path, target_workbook):
         macro_template = Template(macro_file.read())
 
     rendered_macro = macro_template.render(
-        malware_url=cfg["app"]["macros"]["malware_url"],
+        agent_url=cfg["app"]["macros"]["agent_url"],
         reverse_shell_ip=cfg["app"]["macros"]["reverse_shell_ip"],
+        caldera_ip=cfg["app"]["macros"]["caldera_ip"],
     )
 
     target_vba_project = target_workbook.VBProject
@@ -49,9 +50,7 @@ def get_template_path(template_name):
     if os.path.basename(template_name) != template_name:
         raise ValueError("Template must be a filename from templates/files/ms_office")
     if extension not in valid_extensions:
-        raise ValueError(
-            "Excel templates must use .xls, .xlsm, .xlsx, .xltm, or .xltx"
-        )
+        raise ValueError("Excel templates must use .xls, .xlsm, .xlsx, .xltm, or .xltx")
 
     template_path = os.path.join(template_dir, "files", "ms_office", template_name)
     if not os.path.isfile(template_path):

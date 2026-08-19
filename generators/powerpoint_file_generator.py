@@ -32,8 +32,9 @@ def insert_macro_from_file(macro_path, target_presentation):
         macro_template = Template(macro_file.read())
 
     rendered_macro = macro_template.render(
-        malware_url=cfg["app"]["macros"]["malware_url"],
+        agent_url=cfg["app"]["macros"]["agent_url"],
         reverse_shell_ip=cfg["app"]["macros"]["reverse_shell_ip"],
+        caldera_ip=cfg["app"]["macros"]["caldera_ip"],
     )
 
     target_vba_project = target_presentation.VBProject

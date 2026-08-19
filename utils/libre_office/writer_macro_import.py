@@ -1,87 +1,132 @@
-import socket
-import uno
+"""Embed an already-validated manual Basic macro into a Writer document.
+
+This script runs with LibreOffice's Python runtime because that runtime provides
+the UNO bridge. It intentionally uses syntax compatible with older LibreOffice
+Python runtimes. It never executes the macro and never registers a document
+event for it.
+"""
+
+from __future__ import print_function
+
+import io
 import os
 import sys
 import time
 
-# Initialize the UNO runtime
-localContext = uno.getComponentContext()
-resolver = localContext.ServiceManager.createInstanceWithContext(
-    "com.sun.star.bridge.UnoUrlResolver", localContext
-)
-ctx = resolver.resolve(
-    "uno:socket,host=localhost,port=2002;urp;StarOffice.ComponentContext"
-)
-smgr = ctx.ServiceManager
+import uno
 
 
-def insert_macro(model, macro_path):
-    # Query the interface
-    script_provider_supplier = model.getScriptProviderSupplier()
+def _property(name, value):
+    property_value = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
+    property_value.Name = name
+    property_value.Value = value
+    return property_value
 
-    if script_provider_supplier is not None:
-        # Now you can use the 'script_provider_supplier' object to access the script provider
-        # and manage macros
-        # For example:
-        script_provider = script_provider_supplier.getScriptProvider()
-        if script_provider is not None:
-            print("successs")
-            # Now you can use 'script_provider' to manage macros
-            # e.g., script_provider.createScript, script_provider.getModule, etc.
-        else:
-            print("Script provider not found.")
+
+def _connect(port):
+    local_context = uno.getComponentContext()
+    resolver = local_context.ServiceManager.createInstanceWithContext(
+        "com.sun.star.bridge.UnoUrlResolver", local_context
+    )
+    connection = (
+        "uno:socket,host=127.0.0.1,port={0};urp;"
+        "StarOffice.ComponentContext"
+    ).format(port)
+    last_error = None
+    for _ in range(120):
+        try:
+            return resolver.resolve(connection)
+        except Exception as exc:  # noqa: BLE001 - UNO raises bridge-specific errors
+            last_error = exc
+            time.sleep(0.25)
+    error = RuntimeError("Could not connect to the LibreOffice UNO bridge")
+    if last_error is not None:
+        raise error
+    raise error
+
+
+def _basic_libraries(document):
+    getter = getattr(document, "getBasicLibraries", None)
+    if getter is not None:
+        return getter()
+    return document.BasicLibraries
+
+
+def insert_macro(document, macro_path, module_name="Module1"):
+    """Insert source into document.Standard without setting an autorun event."""
+
+    with io.open(macro_path, "r", encoding="utf-8-sig") as macro_file:
+        source = macro_file.read()
+
+    libraries = _basic_libraries(document)
+    if not libraries.hasByName("Standard"):
+        libraries.createLibrary("Standard")
+    elif hasattr(libraries, "isLibraryLoaded") and not libraries.isLibraryLoaded(
+        "Standard"
+    ):
+        libraries.loadLibrary("Standard")
+
+    standard = libraries.getByName("Standard")
+    if standard.hasByName(module_name):
+        standard.replaceByName(module_name, source)
     else:
-        print("XScriptProviderSupplier interface not found.")
+        standard.insertByName(module_name, source)
 
-    # Access the BasicScript provider
-    script_provider_supplier = (
-        model.com.sun.star.script.provider.XScriptProviderSupplier
+
+def import_macro(template_file, macro_file, output_file, port):
+    context = _connect(port)
+    service_manager = context.ServiceManager
+    desktop = service_manager.createInstanceWithContext(
+        "com.sun.star.frame.Desktop", context
     )
-    script_provider = script_provider_supplier.getScriptProvider(
-        "vnd.sun.star.script:Standard.Module1?language=Basic&location=document"
-    )
+    document = None
+    try:
+        document = desktop.loadComponentFromURL(
+            uno.systemPathToFileUrl(os.path.abspath(template_file)),
+            "_blank",
+            0,
+            (_property("Hidden", True), _property("ReadOnly", False)),
+        )
+        if document is None:
+            raise RuntimeError(
+                "LibreOffice could not open template: {0}".format(template_file)
+            )
 
-    if not script_provider:
-        raise RuntimeError("Script provider not found.")
-
-    # Access the module container
-    module_container = script_provider.getModule("")
-    if not module_container:
-        raise RuntimeError("Module container not found.")
-
-    # Load the macro from file
-    macro_file = open(macro_path, "r")
-    macro_content = macro_file.read()
-    macro_file.close()
-
-    # Insert the macro into the module
-    module_container.insertByName("Module1", macro_content)
+        insert_macro(document, macro_file)
+        output_directory = os.path.dirname(os.path.abspath(output_file))
+        if output_directory and not os.path.isdir(output_directory):
+            os.makedirs(output_directory)
+        document.storeAsURL(
+            uno.systemPathToFileUrl(os.path.abspath(output_file)),
+            (_property("FilterName", "writer8"), _property("Overwrite", True)),
+        )
+    finally:
+        if document is not None:
+            document.close(True)
 
 
-def main(template_file, macro_file, output_file):
-    desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
-    model = desktop.getCurrentComponent()
-    # print(dir(model))
-    print(dir(model.ScriptContainer.ScriptProvider))
+def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else argv
+    if len(arguments) != 4:
+        print(
+            "Usage: writer_macro_import.py "
+            "<template_file> <macro_file> <output_file> <port>",
+            file=sys.stderr,
+        )
+        return 2
 
-    if model is None:
-        print("Error loading the document.")
-        return
-
-    insert_macro(model, macro_file)
-    time.sleep(25)  # Use sleep instead of wait
-    model.storeToURL(os.path.abspath(output_file), ())
+    try:
+        import_macro(
+            arguments[0],
+            arguments[1],
+            arguments[2],
+            int(arguments[3]),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print("Macro import failed: {0}".format(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print(
-            "Usage: python insert_text.py <template_file> <macro_file> <output_folder>"
-        )
-        sys.exit(1)
-
-    template_file = sys.argv[1]
-    macro_file = sys.argv[2]
-    output_file = sys.argv[3]
-
-    main(template_file, macro_file, output_file)
+    raise SystemExit(main())

@@ -3,5 +3,8 @@ app:
     exe: "c:/Program Files (x86)/LibreOffice 5/program/soffice.exe"
     python: "c:/Program Files (x86)/LibreOffice 5/program/python.exe"
   macros:
-    malware_url: http://www.kyberakadenia.sk/login_email
+    agent_url: http://www.kyberakadenia.sk/login_email
     reverse_shell_ip: "127.0.0.1"
+    caldera_ip: "127.0.0.1"
+  webservice:
+    exfil_url: "http://127.0.0.1:8080/exfil"

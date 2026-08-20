@@ -8,3 +8,8 @@ app:
     caldera_ip: "192.168.7.40"
   webservice:
     exfil_url: "http://127.0.0.1:8080/exfil"
+  xor:
+    # Repeating-key XOR applied to every generated file (written as <file>.xored).
+    # Default matches Caldera's payload_encoder.py DEFAULT_KEY = [0x32, 0x45, 0x32, 0xca].
+    # Use a plain string (UTF-8 bytes) or a hex value such as 0x55 for a single-byte key.
+    key: "0x324532CA"

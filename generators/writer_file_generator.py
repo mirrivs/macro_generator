@@ -22,8 +22,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import yaml
 from jinja2 import Template
+
+from utils.xor import encrypt_file, load_xor_key
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -233,6 +237,8 @@ def main(template_name: str, macro_name: str) -> str:
         finally:
             _stop_process(process)
 
+    xored_path = encrypt_file(output_file, load_xor_key(PROJECT_DIR))
+    print(f"XORed file: {xored_path}")
     return str(output_file)
 
 

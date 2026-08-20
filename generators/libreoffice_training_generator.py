@@ -15,6 +15,10 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils.xor import encrypt_file, load_xor_key
+
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_DIR / "output"
@@ -230,11 +234,17 @@ def main(argv: list[str] | None = None) -> int:
             title=args.title,
             include_safe_macro=args.include_safe_macro,
         )
+        key = load_xor_key(PROJECT_DIR)
+        xored_paths = [encrypt_file(odt_path, key)]
+        if macro_path:
+            xored_paths.append(encrypt_file(macro_path, key))
     except (OSError, ValueError) as exc:
         print(f"Generation failed: {exc}", file=sys.stderr)
         return 1
 
     print(f"Generated: {odt_path}")
+    for xored_path in xored_paths:
+        print(f"XORed file: {xored_path}")
     if macro_path:
         print(f"Companion macro source: {macro_path}")
     return 0

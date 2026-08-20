@@ -1,9 +1,14 @@
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import win32com.client as win32
 import yaml
 from jinja2 import Template
+
+from utils.xor import encrypt_file, load_xor_key
 
 
 cfg = None
@@ -104,6 +109,8 @@ def main(template_name, macro_name):
         if powerpoint_app is not None:
             powerpoint_app.Quit()
 
+    xored_path = encrypt_file(Path(output_path), load_xor_key(Path(project_dir)))
+    print(f"XORed file: {xored_path}")
     return output_path
 
 

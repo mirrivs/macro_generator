@@ -47,6 +47,30 @@ file-changing, process-launch, and autorun patterns are rejected. The old
 LibreOffice `test.txt` payload is not a Basic macro and is intentionally not
 offered by the interactive menu.
 
+### XOR-encoded output
+
+Every generator also writes an XOR-encoded copy of each generated file next to
+the plain one, using a repeating-key XOR and the `.xored` suffix:
+
+```text
+output/Handover_Protocol.docm        # plain macro-enabled document
+output/Handover_Protocol.docm.xored  # XOR-encoded copy
+```
+
+The key comes from `app.xor.key` in `config.yml`; the default
+`0x324532CA` is Caldera's repeating XOR key from `payload_encoder.py`
+(`DEFAULT_KEY = [0x32, 0x45, 0x32, 0xca]`). Use a plain string (UTF-8 bytes)
+or a hex value such as `0x55` for a single-byte key. XOR is symmetric, so
+applying the same operation again restores the original:
+
+```text
+python -m utils.xor output/Handover_Protocol.docm.xored
+```
+
+This restores `output/Handover_Protocol.docm`; running `python -m utils.xor`
+on the plain file encodes it to `.xored`. The plain file is always kept
+alongside the `.xored` copy.
+
 ### Safe LibreOffice training generator
 
 For a passive LibreOffice Writer training artifact, use the dedicated safe

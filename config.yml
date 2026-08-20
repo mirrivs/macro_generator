@@ -5,6 +5,6 @@ app:
   macros:
     agent_url: http://www.kyberakadenia.sk/login_email
     reverse_shell_ip: "127.0.0.1"
-    caldera_ip: "127.0.0.1"
+    caldera_ip: "192.168.7.40"
   webservice:
     exfil_url: "http://127.0.0.1:8080/exfil"

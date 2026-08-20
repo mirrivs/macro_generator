@@ -19,9 +19,38 @@ with open(config_file, "r") as stream:
 
 
 def load_word_template(template_path):
-    app = win32.gencache.EnsureDispatch("Word.Application")
+    # Use a fresh Word instance.  Reusing an existing automation instance can
+    # leave Documents.Open returning an empty proxy after a previous crash.
+    app = win32.DispatchEx("Word.Application")
     app.Visible = False
-    doc = app.Documents.Open(template_path)
+    app.DisplayAlerts = 0
+    try:
+        absolute_template = os.path.abspath(template_path)
+        # Documents.Add expects a Word template (normally .dot/.dotx), not a
+        # regular .docx document. Open the .docx as the source document and
+        # let the caller save a separate .docm copy below.
+        # Word does not necessarily show its "Open and Repair" prompt when it
+        # is automated (and alerts are disabled). Request repair explicitly.
+        # This also handles templates that are valid ZIP packages but contain
+        # OOXML Word cannot parse normally.
+        doc = app.Documents.Open(
+            FileName=absolute_template,
+            ConfirmConversions=False,
+            ReadOnly=False,
+            AddToRecentFiles=False,
+            OpenAndRepair=True,
+        )
+    except Exception:
+        app.Quit()
+        raise
+
+    if doc is None or not hasattr(doc, "SaveAs"):
+        app.Quit()
+        raise RuntimeError(
+            f"Microsoft Word opened but did not return a document for "
+            f"'{template_path}'. Verify that the template is valid and Word "
+            f"can open it interactively."
+        )
     return app, doc
 
 
@@ -70,29 +99,30 @@ def main(template_name, macro_name):
 
     # Load the Word template (template with the associated macro)
     word_app, template_doc = load_word_template(template_path)
+    new_doc = None
+    try:
+        # Save the new document in the output folder
+        os.makedirs(output_dir, exist_ok=True)
+        new_doc_path = os.path.join(
+            output_dir, os.path.splitext(os.path.basename(template_name))[0]
+        ) + ".docm"
+        template_doc.SaveAs(new_doc_path, FileFormat=13)
+        template_doc.Close()
 
-    # Save the new document in the output folder
-    os.makedirs(output_dir, exist_ok=True)
-    new_doc_path = os.path.join(
-        output_dir, os.path.splitext(os.path.basename(template_name))[0]
-    )
-    new_doc_path += ".docm"
-    template_doc.SaveAs(new_doc_path, FileFormat=13)
-    template_doc.Close()
+        # Open the newly created document
+        new_doc = word_app.Documents.Open(new_doc_path)
+        if new_doc is None:
+            raise RuntimeError(f"Word could not reopen generated file '{new_doc_path}'.")
 
-    # Open the newly created document
-    new_doc = word_app.Documents.Open(new_doc_path)
-
-    # Insert macro from text file into the new document
-    insert_macro_from_file(macro_path, new_doc)
-
-    # Save the output document with the macro inserted
-    new_doc.Save()
-
-    # Close the documents
-    new_doc.Close()
-    word_app.Quit()
-    return new_doc_path
+        insert_macro_from_file(macro_path, new_doc)
+        new_doc.Save()
+        return new_doc_path
+    finally:
+        if new_doc is not None:
+            new_doc.Close(False)
+        elif template_doc is not None:
+            template_doc.Close(False)
+        word_app.Quit()
 
 
 if __name__ == "__main__":

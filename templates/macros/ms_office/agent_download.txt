@@ -7,7 +7,7 @@ Function RunShellCommand(command As String) As String
     Dim output As String
     output = shell.Run("powershell.exe -Command " & command, 0)
 
-    RunShellCommand = outputBCR-550
+    RunShellCommand = output
 End Function
 
 Sub autoOpen()
